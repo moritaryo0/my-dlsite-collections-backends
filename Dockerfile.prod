@@ -1,0 +1,18 @@
+# backend/Dockerfile.prod
+FROM python:3.13-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# プロジェクト一式をコピー（appsを含める）
+COPY . .
+
+# 静的ファイルを使う場合のみ
+# RUN python manage.py collectstatic --noinput
+
+ENV DJANGO_SETTINGS_MODULE=app.settings
+EXPOSE 8000
+CMD ["gunicorn", "app.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "60"]

@@ -1,0 +1,12 @@
+# backend/docker-compose.prod.yml（APIのみ）
+version: '3.8'
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    env_file:
+      - .env.prod
+    ports:
+      - "8000:8000"
+    restart: always
