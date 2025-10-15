@@ -6,5 +6,4 @@
     *.log
     media/
     .env.prod
-    Dockerfile
-    docker-compose.yml
+    .env.dev

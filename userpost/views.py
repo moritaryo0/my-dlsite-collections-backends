@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .utils import dlsite_get_ogp_data
+from rest_framework.exceptions import ValidationError
 
 # Create your views here.
 def index(request):
@@ -62,7 +63,12 @@ class UserPostViewSet(viewsets.ModelViewSet):
                 with transaction.atomic():
                     content_data = ContentData.objects.filter(content_url=content_url).first()
                     if not content_data:
-                        ogp_data = dlsite_get_ogp_data(content_url)
+                        try:
+                            ogp_data = dlsite_get_ogp_data(content_url)
+                        except ValidationError:
+                            return Response({
+                                'error': '無効なURLです'
+                            }, status=status.HTTP_400_BAD_REQUEST)
                         if ogp_data:
                             data = {
                                 'content_url': content_url,

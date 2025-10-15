@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+from rest_framework.exceptions import ValidationError
 
 def dlsite_get_ogp_data(url:str):
     """
@@ -25,7 +26,7 @@ def dlsite_get_ogp_data(url:str):
         }
         parsed_url = urlparse(url)
         if parsed_url.netloc != 'www.dlsite.com':
-            return None
+            raise ValidationError('Invalid URL')
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }

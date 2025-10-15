@@ -38,4 +38,4 @@ class LogoutSerializer(serializers.Serializer):
             token = RefreshToken(self.token)
             token.blacklist()
         except TokenError:
-            raise serializers.ValidationError('Invalid token')
+            raise serializers.ValidationError('無効なトークンです')
