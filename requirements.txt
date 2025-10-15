@@ -1,7 +1,0 @@
-Django==5.2.5
-djangorestframework
-requests==2.32.3
-beautifulsoup4==4.13.3
-django-cors-headers
-djangorestframework-simplejwt
-psycopg[binary]

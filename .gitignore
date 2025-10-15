@@ -1,9 +1,0 @@
-    __pycache__/
-    *.py[cod]
-    db.sqlite3
-    venv/
-    .venv/
-    *.log
-    media/
-    .env.prod
-    .env.dev
