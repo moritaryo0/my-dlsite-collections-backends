@@ -1,4 +1,3 @@
-# backend/docker-compose.prod.yml（APIのみ）
 version: '3.8'
 services:
   web:
@@ -9,6 +8,19 @@ services:
       - .env.prod
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    restart: always
+    # ポートは公開せず内部ネットワークのみで待受
+    expose:
+      - "8000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - web
     ports:
-      - "8000:8000"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     restart: always

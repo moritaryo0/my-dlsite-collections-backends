@@ -1,15 +1,21 @@
 # backend/Dockerfile.prod
-FROM python:3.13-slim
+FROM python:3.12-slim
 WORKDIR /app
 
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && update-ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --upgrade pip \
+ && pip install --index-url https://pypi.org/simple setuptools wheel \
+ && pip install --index-url https://pypi.org/simple -r requirements.txt
 
-# プロジェクト一式をコピー（appsを含める）
+
+ 
 COPY . .
-
-# 静的ファイルを使う場合のみ
-# RUN python manage.py collectstatic --noinput
 
 ENV DJANGO_SETTINGS_MODULE=app.settings
 EXPOSE 8000
