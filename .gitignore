@@ -7,5 +7,4 @@ venv/
 media/
 .env.prod
 .env.dev
-nginx/certs/
 *.key
