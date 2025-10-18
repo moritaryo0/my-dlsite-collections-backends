@@ -26,6 +26,29 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=password)
         return user
 
+class RenameUsernameSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['username']
+    username = serializers.CharField(max_length=255)
+    
+    def validate_username(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('ユーザー名は必須です')
+        request = self.context.get('request')
+        if request.user.username == value:
+            raise serializers.ValidationError('現在と同じユーザー名です')
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError('すでに存在するユーザー名です')
+        return value
+    
+    def save(self, **kwargs):
+        user = self.context['request'].user
+        user.username = self.validated_data['username']
+        user.save(update_fields=['username'])
+        return user
+
 class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField()
 

@@ -29,9 +29,9 @@ class UserPostViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = UserPost.objects.all().order_by('-created_at')
-        user_id = self.request.query_params.get('user_id')
-        if user_id:
-            queryset = queryset.filter(user_id=user_id)
+        username = self.request.query_params.get('username') or self.request.query_params.get('user_id')
+        if username:
+            queryset = queryset.filter(user__username=username)
         return queryset
 
 
@@ -41,13 +41,12 @@ class UserPostViewSet(viewsets.ModelViewSet):
         return UserPostSerializer
 
     def create(self, request, *args, **kwargs):
-        user_id = request.user.username
         data = request.data.copy()
-        data['user_id'] = user_id
+        username = request.user.username
         serializer = self.get_serializer(data=data)
         if serializer.is_valid():
             existing_post = UserPost.objects.filter(
-                user_id=user_id,
+                user=request.user,
                 content_url=data.get('content_url')
             ).first()
             if existing_post:
@@ -82,11 +81,12 @@ class UserPostViewSet(viewsets.ModelViewSet):
                             return Response({
                                 'error': 'OGPデータの取得に失敗しました'
                             }, status=status.HTTP_400_BAD_REQUEST)
-                    serializer.save()
+                    instance = serializer.save(username_legacy=username, user=request.user)
 
                     try:
                         Good.objects.create(
-                            user_id=user_id,
+                            user=request.user,
+                            username_legacy=username,
                             content_url=content_url
                         )
                         content_data.good_count += 1
@@ -99,7 +99,7 @@ class UserPostViewSet(viewsets.ModelViewSet):
 
                     return Response({
                         'success': '投稿を完了',
-                        'data': serializer.data
+                        'data': UserPostSerializer(instance).data
                     }, status=status.HTTP_201_CREATED)
             except Exception as e:
                 print(e)
@@ -109,42 +109,31 @@ class UserPostViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def destroy(self, request, *args, **kwargs):
-        
         try:
             userpost = self.get_object()
 
-            if request.user.username != userpost.user_id:
-                return Response({
-                    'error': '投稿を削除する権限がありません'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
+            if (userpost.user and request.user != userpost.user) or (not userpost.user and request.user.username != userpost.username_legacy):
+                return Response({'error': '投稿を削除する権限がありません'}, status=status.HTTP_400_BAD_REQUEST)
+
             content_url = userpost.content_url
-            user_id = userpost.user_id
-            
-            with transaction.atomic():  
-                good_objects = Good.objects.filter(
-                    user_id=user_id,
-                    content_url=content_url
-                )
-                
-                
+            username = userpost.username_legacy
+
+            with transaction.atomic():
+                good_objects = Good.objects.filter(user=request.user, content_url=content_url)
+                if not good_objects.exists():
+                    good_objects = Good.objects.filter(username_legacy=username, content_url=content_url)
+
                 content_data = ContentData.objects.filter(content_url=content_url).first()
                 if content_data and good_objects.exists():
                     content_data.good_count -= good_objects.count()
                     content_data.save()
-                
+
                 good_objects.delete()
-                
                 self.perform_destroy(userpost)
-                
-            return Response({
-                'success': '投稿を削除しました'
-            }, status=status.HTTP_200_OK)
-            
+
+            return Response({'success': '投稿を削除しました'}, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response({
-                'error': '削除に失敗しました'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': '削除に失敗しました'}, status=status.HTTP_400_BAD_REQUEST)
 
 class ContentDataViewSet(viewsets.ModelViewSet):
     queryset = ContentData.objects.all().order_by('-created_at')
@@ -187,31 +176,29 @@ class ContentDataViewSet(viewsets.ModelViewSet):
     def good(self, request, *args, **kwargs):
         #Goodの処理として作ったけど、これは作品の登録数の管理として使用する
         content_data = self.get_object()
-        user_id = request.data.get('user_id')
+        if not request.user or not request.user.is_authenticated:
+            return Response({'error': '認証が必要です'}, status=status.HTTP_401_UNAUTHORIZED)
         content_url = request.data.get('content_url')
-        if not user_id:
-            return Response({'error': 'ユーザーIDが必要です'}, status=status.HTTP_400_BAD_REQUEST)
-        existing_good = Good.objects.filter(
-            user_id=user_id,
-            content_url=content_url
-        ).first()
+        if not content_url:
+            return Response({'error': 'content_urlが必要です'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_good = Good.objects.filter(user=request.user, content_url=content_url).first()
         if existing_good:
             existing_good.delete()
             content_data.good_count -= 1
             is_good = False
-        else:   
+        else:
             try:
                 Good.objects.create(
-                    user_id=user_id,
+                    user=request.user,
+                    username_legacy=request.user.username,
                     content_url=content_url
                 )
                 content_data.good_count += 1
                 is_good = True
             except Exception as e:
                 print(f"作品登録数の記録に失敗しました: {e}")
-                return Response({
-                    'error': f"作品登録数の記録に失敗しました: {e}"
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': f"作品登録数の記録に失敗しました: {e}"}, status=status.HTTP_400_BAD_REQUEST)
         content_data.save()
         response_data = ContentDataSerializer(content_data).data
         response_data['is_good'] = is_good

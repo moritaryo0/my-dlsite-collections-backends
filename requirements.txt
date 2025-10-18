@@ -6,3 +6,5 @@ django-cors-headers
 djangorestframework-simplejwt
 gunicorn
 psycopg[binary]
+
+#docker compose -f docker-compose.prod.yml build --no-cache --progress=plain
