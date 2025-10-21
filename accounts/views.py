@@ -38,3 +38,22 @@ class RenameUsernameView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(UserSerializer(serializer.instance).data, status=status.HTTP_200_OK)
+
+
+class PrivacyView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response({'private': bool(getattr(request.user, 'private', False))})
+
+    def post(self, request):
+        value = request.data.get('private')
+        if isinstance(value, bool) is False:
+            # allow string 'true'/'false'
+            if isinstance(value, str):
+                value = value.lower() in ('1', 'true', 'yes', 'on')
+            else:
+                return Response({'error': 'private は true/false で指定してください'}, status=status.HTTP_400_BAD_REQUEST)
+        request.user.private = bool(value)
+        request.user.save(update_fields=['private'])
+        return Response({'private': request.user.private}, status=status.HTTP_200_OK)

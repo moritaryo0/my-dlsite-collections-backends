@@ -4,6 +4,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 import json
 from .models import UserPost, ContentData, Good
+from django.contrib.auth import get_user_model
 from .serializers import UserPostSerializer, UserPostCreateSerializer, ContentDataSerializer, ContentDataCreateSerializer
 from rest_framework import viewsets, status
 from rest_framework.response import Response
@@ -203,3 +204,29 @@ class ContentDataViewSet(viewsets.ModelViewSet):
         response_data = ContentDataSerializer(content_data).data
         response_data['is_good'] = is_good
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class PublicUsersView(viewsets.ViewSet):
+    permission_classes = [AllowAny]
+
+    def list(self, request):
+        """List users with private=False and their recent posts."""
+        User = get_user_model()
+        users = User.objects.filter(private=False).order_by('id')[:100]
+        result = []
+        for u in users:
+            posts = UserPost.objects.filter(user=u).order_by('-created_at')[:20]
+            result.append({
+                'username': u.username,
+                'posts': [
+                    {
+                        'id': p.id,
+                        'content_url': p.content_url,
+                        'description': p.description,
+                        'title': (ContentData.objects.filter(content_url=p.content_url).values_list('title', flat=True).first() or ''),
+                        'image': (ContentData.objects.filter(content_url=p.content_url).values_list('image', flat=True).first() or ''),
+                        'created_at': p.created_at.isoformat(),
+                    } for p in posts
+                ]
+            })
+        return Response(result)

@@ -7,4 +7,8 @@ djangorestframework-simplejwt
 gunicorn
 psycopg[binary]
 
+# social auth
+django-allauth
+requests-oauthlib
+
 #docker compose -f docker-compose.prod.yml build --no-cache --progress=plain

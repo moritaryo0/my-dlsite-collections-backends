@@ -17,11 +17,14 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from .views import social_login_success
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('userpost/', include('userpost.urls')),
     path('accounts/', include('accounts.urls')),
+    path('social/', include('allauth.urls')),
+    path('social/login/success/', social_login_success, name='social-login-success'),
     path('auth/jwt/create/', TokenObtainPairView.as_view(), name='jwt-create'),
     path('auth/jwt/refresh/', TokenRefreshView.as_view(), name='jwt-refresh'),
 ]

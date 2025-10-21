@@ -6,6 +6,7 @@ from . import views
 router = DefaultRouter()
 router.register(r'posts', views.UserPostViewSet, basename='userpost')
 router.register(r'contents', views.ContentDataViewSet, basename='content') 
+router.register(r'public_users', views.PublicUsersView, basename='public-users')
 
 urlpatterns = [
     path("", views.index, name="index"),

@@ -1,4 +1,9 @@
 from typing import Optional
+import os
+from django.http import HttpResponseRedirect
+from django.shortcuts import render
+from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import exception_handler
 from rest_framework.response import Response
 from rest_framework import status
@@ -53,4 +58,32 @@ def custom_exception_handler(exc, context) -> Optional[Response]:
 
     return response
 
+
+
+def social_login_success(request):
+    """After allauth completes login, issue JWT and redirect to frontend.
+
+    This view assumes the user is already authenticated by allauth.
+    """
+    if not request.user or not request.user.is_authenticated:
+        # fallback: redirect home
+        return HttpResponseRedirect(os.getenv('FRONTEND_ORIGIN', 'http://localhost:5173'))
+
+    user = request.user
+    refresh = RefreshToken.for_user(user)
+    access = str(refresh.access_token)
+    refresh_str = str(refresh)
+    frontend = os.getenv('FRONTEND_ORIGIN', 'http://localhost:5173')
+    # 初回サインアップなら /x-signup に誘導（トークンも付与）
+    if request.session.pop('is_new_social_user', False):
+        redirect_url = f"{frontend}/x-signup?access={access}&refresh={refresh_str}"
+        return HttpResponseRedirect(redirect_url)
+    # 通常はホームへ
+    redirect_url = f"{frontend}/?access={access}&refresh={refresh_str}"
+    return HttpResponseRedirect(redirect_url)
+
+
+"""
+Removed x_login_start and x_login_page for OAuth2 direct start from allauth URL.
+"""
 
