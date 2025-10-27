@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+ 
 
 # Create your models here.
 class UserPost(models.Model):
@@ -9,6 +10,7 @@ class UserPost(models.Model):
     content_url = models.URLField()
     created_at = models.DateTimeField(auto_now_add=True)
     good_count = models.IntegerField(default=0)
+    list = models.ForeignKey('userlists.UserList', on_delete=models.SET_NULL, null=True, blank=True, related_name='userposts')
 
     def __str__(self):
         return self.username_legacy

@@ -11,7 +11,10 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .utils import dlsite_get_ogp_data
+from userlists.models import UserList
 from rest_framework.exceptions import ValidationError
+from userlists.models import UserList
+from django.db.models import Q
 
 # Create your views here.
 def index(request):
@@ -31,8 +34,24 @@ class UserPostViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = UserPost.objects.all().order_by('-created_at')
         username = self.request.query_params.get('username') or self.request.query_params.get('user_id')
+        list_id = self.request.query_params.get('list_id')
         if username:
             queryset = queryset.filter(user__username=username)
+        if list_id:
+            try:
+                lst = UserList.objects.select_related('owner').get(id=list_id)
+            except UserList.DoesNotExist:
+                return queryset.none()
+            # 非公開: オーナーまたはGootList登録者のみ閲覧可
+            if not lst.is_public:
+                user = getattr(self.request, 'user', None)
+                if not user or not user.is_authenticated:
+                    return queryset.none()
+                from userlists.models import GootList
+                is_authorized = (user == lst.owner) or GootList.objects.filter(user=user, userlist=lst).exists()
+                if not is_authorized:
+                    return queryset.none()
+            queryset = queryset.filter(list_id=lst.id)
         return queryset
 
 
@@ -44,7 +63,7 @@ class UserPostViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         data = request.data.copy()
         username = request.user.username
-        serializer = self.get_serializer(data=data)
+        serializer = self.get_serializer(data=data, context={'request': request})
         if serializer.is_valid():
             existing_post = UserPost.objects.filter(
                 user=request.user,
@@ -70,19 +89,30 @@ class UserPostViewSet(viewsets.ModelViewSet):
                                 'error': '無効なURLです'
                             }, status=status.HTTP_400_BAD_REQUEST)
                         if ogp_data:
-                            data = {
+                            data_cd = {
                                 'content_url': content_url,
                                 'title': ogp_data.get('title', ''),
                                 'description': ogp_data.get('description', ''),
                                 'image': ogp_data.get('image', ''),
                                 'content_type': data.get('content_type', '未設定')
                             }
-                            content_data = ContentData.objects.create(**data)
+                            content_data = ContentData.objects.create(**data_cd)
                         else:
                             return Response({
                                 'error': 'OGPデータの取得に失敗しました'
                             }, status=status.HTTP_400_BAD_REQUEST)
-                    instance = serializer.save(username_legacy=username, user=request.user)
+                    # Determine list to assign
+                    list_instance = getattr(serializer, '_list_instance', None)
+                    if list_instance is None:
+                        # default to Home list
+                        list_instance, _ = UserList.objects.get_or_create(owner=request.user, name='Home', defaults={'description': 'ホーム', 'is_public': True})
+                    instance = UserPost.objects.create(
+                        username_legacy=username,
+                        user=request.user,
+                        description=serializer.validated_data.get('description'),
+                        content_url=content_url,
+                        list=list_instance
+                    )
 
                     try:
                         Good.objects.create(
@@ -127,7 +157,11 @@ class UserPostViewSet(viewsets.ModelViewSet):
                 content_data = ContentData.objects.filter(content_url=content_url).first()
                 if content_data and good_objects.exists():
                     content_data.good_count -= good_objects.count()
-                    content_data.save()
+                    if content_data.good_count <= 0:
+                        content_data.delete()
+                        content_data = None
+                    else:
+                        content_data.save()
 
                 good_objects.delete()
                 self.perform_destroy(userpost)
@@ -135,6 +169,25 @@ class UserPostViewSet(viewsets.ModelViewSet):
             return Response({'success': '投稿を削除しました'}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': '削除に失敗しました'}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def move_list(self, request, *args, **kwargs):
+        try:
+            userpost = self.get_object()
+            if not request.user or request.user != userpost.user:
+                return Response({'error': 'この投稿を編集する権限がありません'}, status=status.HTTP_400_BAD_REQUEST)
+            list_id = request.data.get('list_id')
+            if list_id is None:
+                return Response({'error': 'list_idが必要です'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                target_list = UserList.objects.get(id=int(list_id), owner=request.user)
+            except UserList.DoesNotExist:
+                return Response({'error': '指定されたリストが見つからないか、権限がありません'}, status=status.HTTP_400_BAD_REQUEST)
+            userpost.list = target_list
+            userpost.save(update_fields=['list'])
+            return Response({'success': True, 'data': UserPostSerializer(userpost).data}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': 'リスト変更に失敗しました'}, status=status.HTTP_400_BAD_REQUEST)
 
 class ContentDataViewSet(viewsets.ModelViewSet):
     queryset = ContentData.objects.all().order_by('-created_at')
@@ -188,6 +241,9 @@ class ContentDataViewSet(viewsets.ModelViewSet):
             existing_good.delete()
             content_data.good_count -= 1
             is_good = False
+            if content_data.good_count <= 0:
+                content_data.delete()
+                return Response({'id': content_data.id if hasattr(content_data, 'id') else None, 'is_good': is_good, 'good_count': 0}, status=status.HTTP_200_OK)
         else:
             try:
                 Good.objects.create(
@@ -215,7 +271,12 @@ class PublicUsersView(viewsets.ViewSet):
         users = User.objects.filter(private=False).order_by('id')[:100]
         result = []
         for u in users:
-            posts = UserPost.objects.filter(user=u).order_by('-created_at')[:20]
+            posts = (
+                UserPost.objects
+                .filter(user=u)
+                .filter(Q(list__isnull=True) | Q(list__is_public=True))
+                .order_by('-created_at')[:20]
+            )
             result.append({
                 'username': u.username,
                 'posts': [
@@ -225,6 +286,7 @@ class PublicUsersView(viewsets.ViewSet):
                         'description': p.description,
                         'title': (ContentData.objects.filter(content_url=p.content_url).values_list('title', flat=True).first() or ''),
                         'image': (ContentData.objects.filter(content_url=p.content_url).values_list('image', flat=True).first() or ''),
+                        'content_type': (ContentData.objects.filter(content_url=p.content_url).values_list('content_type', flat=True).first() or ''),
                         'created_at': p.created_at.isoformat(),
                     } for p in posts
                 ]
