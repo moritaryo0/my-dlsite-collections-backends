@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import (BaseUserManager,AbstractBaseUser,PermissionsMixin)
 from django.utils.translation import gettext_lazy as _
+import uuid
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -42,6 +43,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         verbose_name=_("nickname"),
         null=True,
     )
+    guest_id = models.UUIDField(
+        unique=True,
+        null=True,
+        blank=True,
+        verbose_name=_("guest ID"),
+        help_text=_("ゲストユーザー識別用のUUID"),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     private = models.BooleanField(default=False)
@@ -53,4 +61,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = []
 
     def __str__(self):
-        return self.username
+        if self.username:
+            return self.username
+        elif self.guest_id:
+            return f"Guest({self.guest_id})"
+        else:
+            return f"User({self.id})"

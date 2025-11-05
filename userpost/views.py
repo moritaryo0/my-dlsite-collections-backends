@@ -15,6 +15,7 @@ from userlists.models import UserList
 from rest_framework.exceptions import ValidationError
 from userlists.models import UserList
 from django.db.models import Q
+from accounts.utils import get_or_create_guest_user
 
 # Create your views here.
 def index(request):
@@ -26,7 +27,8 @@ class UserPostViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ['create', 'destroy']:
-            permission_classes = [IsAuthenticated]
+            # ゲストユーザーも投稿できるようにAllowAnyに変更
+            permission_classes = [AllowAny]
         else:
             permission_classes = [AllowAny]
         return [permission() for permission in permission_classes]
@@ -62,11 +64,35 @@ class UserPostViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         data = request.data.copy()
-        username = request.user.username
+        
+        # 認証済みユーザーまたはゲストユーザーを取得
+        user = None
+        username = None
+        
+        if request.user.is_authenticated:
+            user = request.user
+            username = request.user.username
+        else:
+            # ゲストユーザーの場合、guest_idからUserを取得または作成
+            guest_id = getattr(request, 'guest_id', None)
+            if guest_id:
+                user, _ = get_or_create_guest_user(guest_id)
+                # username_legacy には空文字ではなくゲストIDベースの識別子を保存
+                username = f"u-{guest_id}"
+            else:
+                return Response({
+                    'error': '認証が必要です'
+                }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        if not user:
+            return Response({
+                'error': '認証が必要です'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
         serializer = self.get_serializer(data=data, context={'request': request})
         if serializer.is_valid():
             existing_post = UserPost.objects.filter(
-                user=request.user,
+                user=user,
                 content_url=data.get('content_url')
             ).first()
             if existing_post:
@@ -105,10 +131,10 @@ class UserPostViewSet(viewsets.ModelViewSet):
                     list_instance = getattr(serializer, '_list_instance', None)
                     if list_instance is None:
                         # default to Home list
-                        list_instance, _ = UserList.objects.get_or_create(owner=request.user, name='Home', defaults={'description': 'ホーム', 'is_public': True})
+                        list_instance, _ = UserList.objects.get_or_create(owner=user, name='Home', defaults={'description': 'ホーム', 'is_public': True})
                     instance = UserPost.objects.create(
-                        username_legacy=username,
-                        user=request.user,
+                        username_legacy=(username or (request.user.username if request.user.is_authenticated else 'guest')),
+                        user=user,
                         description=serializer.validated_data.get('description'),
                         content_url=content_url,
                         list=list_instance
@@ -116,8 +142,8 @@ class UserPostViewSet(viewsets.ModelViewSet):
 
                     try:
                         Good.objects.create(
-                            user=request.user,
-                            username_legacy=username,
+                            user=user,
+                            username_legacy=(username or (request.user.username if request.user.is_authenticated else 'guest')),
                             content_url=content_url
                         )
                         content_data.good_count += 1
@@ -143,14 +169,26 @@ class UserPostViewSet(viewsets.ModelViewSet):
         try:
             userpost = self.get_object()
 
-            if (userpost.user and request.user != userpost.user) or (not userpost.user and request.user.username != userpost.username_legacy):
+            # 操作主体のユーザー（認証 or ゲスト）を取得
+            actor = request.user if getattr(request.user, 'is_authenticated', False) else None
+            actor_name = None
+            if actor is None:
+                guest_id = getattr(request, 'guest_id', None)
+                if guest_id:
+                    actor, _ = get_or_create_guest_user(guest_id)
+                    actor_name = f"u-{guest_id}"
+            else:
+                actor_name = getattr(actor, 'username', None)
+
+            # 権限チェック
+            if (userpost.user and actor != userpost.user) or (not userpost.user and actor_name != userpost.username_legacy):
                 return Response({'error': '投稿を削除する権限がありません'}, status=status.HTTP_400_BAD_REQUEST)
 
             content_url = userpost.content_url
             username = userpost.username_legacy
 
             with transaction.atomic():
-                good_objects = Good.objects.filter(user=request.user, content_url=content_url)
+                good_objects = Good.objects.filter(user=actor, content_url=content_url)
                 if not good_objects.exists():
                     good_objects = Good.objects.filter(username_legacy=username, content_url=content_url)
 
@@ -170,11 +208,18 @@ class UserPostViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({'error': '削除に失敗しました'}, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def move_list(self, request, *args, **kwargs):
         try:
             userpost = self.get_object()
-            if not request.user or request.user != userpost.user:
+            # 操作主体のユーザー（認証 or ゲスト）を取得
+            actor = request.user if getattr(request.user, 'is_authenticated', False) else None
+            if actor is None:
+                guest_id = getattr(request, 'guest_id', None)
+                if guest_id:
+                    actor, _ = get_or_create_guest_user(guest_id)
+            # 権限チェック
+            if (userpost.user and actor != userpost.user) or (not userpost.user and (not actor or actor.guest_id is None)):
                 return Response({'error': 'この投稿を編集する権限がありません'}, status=status.HTTP_400_BAD_REQUEST)
             list_id = request.data.get('list_id')
             if list_id is None:
@@ -226,17 +271,23 @@ class ContentDataViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def good(self, request, *args, **kwargs):
         #Goodの処理として作ったけど、これは作品の登録数の管理として使用する
         content_data = self.get_object()
-        if not request.user or not request.user.is_authenticated:
-            return Response({'error': '認証が必要です'}, status=status.HTTP_401_UNAUTHORIZED)
+        # 操作主体（認証 or ゲスト）
+        actor = request.user if getattr(request.user, 'is_authenticated', False) else None
+        actor_name = getattr(actor, 'username', None) if actor else None
+        if actor is None:
+            guest_id = getattr(request, 'guest_id', None)
+            if guest_id:
+                actor, _ = get_or_create_guest_user(guest_id)
+                actor_name = f"u-{guest_id}"
         content_url = request.data.get('content_url')
         if not content_url:
             return Response({'error': 'content_urlが必要です'}, status=status.HTTP_400_BAD_REQUEST)
 
-        existing_good = Good.objects.filter(user=request.user, content_url=content_url).first()
+        existing_good = Good.objects.filter(user=actor, content_url=content_url).first()
         if existing_good:
             existing_good.delete()
             content_data.good_count -= 1
@@ -247,8 +298,8 @@ class ContentDataViewSet(viewsets.ModelViewSet):
         else:
             try:
                 Good.objects.create(
-                    user=request.user,
-                    username_legacy=request.user.username,
+                    user=actor,
+                    username_legacy=(actor_name or 'guest'),
                     content_url=content_url
                 )
                 content_data.good_count += 1

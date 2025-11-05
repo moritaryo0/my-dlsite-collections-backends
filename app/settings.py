@@ -64,6 +64,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'allauth.account.middleware.AccountMiddleware',
+    'accounts.middleware.GuestIdMiddleware',  # ゲストID管理ミドルウェア
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -176,10 +177,11 @@ REST_FRAMEWORK = {
 }
 
 # CORS settings for local React dev server
-CORS_ALLOWED_ORIGINS = os.getenv(
-    'DJANGO_CORS_ALLOWED_ORIGINS',
-    'http://localhost:5173'
-).split(',')
+cors_origins = os.getenv('DJANGO_CORS_ALLOWED_ORIGINS', '')
+CORS_ALLOWED_ORIGINS = cors_origins.split(',') if cors_origins else []
+
+# クッキーを送信できるようにする（ゲストID用）
+CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = os.getenv(
     'DJANGO_CSRF_TRUSTED_ORIGINS',

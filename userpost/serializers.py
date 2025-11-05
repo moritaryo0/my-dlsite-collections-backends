@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import UserPost, ContentData
 from userlists.models import UserList
+from accounts.utils import get_or_create_guest_user
 
 User = get_user_model()
 
@@ -41,7 +42,16 @@ class UserPostCreateSerializer(serializers.ModelSerializer):
         list_id = attrs.pop('list_id', None) if 'list_id' in attrs else None
         self._list_instance = None
         request = self.context.get('request')
-        user = getattr(request, 'user', None)
+        # 現在の操作主体ユーザーを取得（認証済み or ゲスト）
+        user = None
+        if request is not None:
+            req_user = getattr(request, 'user', None)
+            if req_user is not None and getattr(req_user, 'is_authenticated', False):
+                user = req_user
+            else:
+                guest_id = getattr(request, 'guest_id', None)
+                if guest_id:
+                    user, _ = get_or_create_guest_user(guest_id)
         if list_id is not None:
             try:
                 lst = UserList.objects.get(id=list_id)

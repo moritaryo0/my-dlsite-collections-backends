@@ -17,6 +17,8 @@ def dlsite_get_ogp_data(url:str):
             'url': URL
         }
     """
+    #https://dlaf.jp/maniax/dlaf/=/t/s/link/work/aid/orenodojinme_ta/id/RJ01473335.html
+    #https://dlaf.jp/maniax/dlaf/=/t/s/link/work/aid/orenodojinme_ta/id/RJ01472676.html
     try:
         ogp_data = {
             'title': '',
